@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 )
 
 func writeMain() {
@@ -20,7 +21,7 @@ import (
 
 const (
 	// @todo change your project name and version...
-	PROJECT_NAME = "PROJECT_NAME"
+	PROJECT_NAME = "%s"
 	VERSION      = "1.1.0"
 )
 
@@ -75,7 +76,7 @@ func run(ex chan bool) {
 			return
 		}
 	}
-}`, name, name)
+}`, project_path, project_path, strings.ToUpper(name))
 
 	write(root_path+"/main.go", str)
 }
@@ -87,6 +88,8 @@ server:
 #  addr: 0.0.0.0
 #  port: 5001
 
+#consul: true
+
 db:
   dbserviceName:
     master:
@@ -94,10 +97,11 @@ db:
       name: "mysql db name"
       user: "root"
       pswd: "111111"
-    openConns: 200
-    idleConns: 0`
+    openConns: 20
+    idleConns: 20
+    showLog: true`
 
-	write(root_path+"/server/conf/config.yaml", str)
+	write(root_path+"/conf/config.yaml", str)
 }
 
 func writeConfig() {
@@ -173,7 +177,7 @@ func (c *Config) initLog() {
 	}
 }
 `
-	str = fmt.Sprintf(str, name)
+	str = fmt.Sprintf(str, project_path)
 
 	write(root_path+"/server/config/config.go", str)
 }
@@ -184,31 +188,76 @@ func writeBaseHandler() {
 import (
 	"github.com/gin-gonic/gin"
 
-	"%s/server/pkg/errno"
+	"%s/server/packages/errno"
+	"%s/server/protocols"
 	"net/http"
+	"strconv"
 )
 
 type Base struct {
 }
 
 // Success 执行成功
-func (this *Base) Success(c *gin.Context, data interface{}) {
-	c.JSON(http.StatusOK, gin.H{
-		"msg_code":    errno.OK.Code,
-		"message":     errno.OK.Message,
-		"attachment":  data,
+func (this *Base) Success(c *gin.Context, data ...interface{}) {
+	var out interface{}
+	if len(data) == 0 {
+		out = gin.H{}
+	} else {
+		out = data[0]
+	}
+
+	c.JSON(http.StatusOK, protocols.Response{
+		Code:       errno.OK.Code,
+		Message:    errno.OK.Message,
+		Attachment: out,
 	})
 }
 
 // Failed 执行失败
 func (this *Base) Failed(c *gin.Context, code *errno.Errno) {
-	c.JSON(http.StatusOK, gin.H{
-		"msg_code":    code.Code,
-		"message":     code.Message,
-		"attachment":  gin.H{},
+	debug := code.Debug
+	c.JSON(http.StatusOK, protocols.Response{
+		Code:       code.Code,
+		Debug:      debug,
+		Message:    code.Error(),
+		Attachment: gin.H{},
 	})
 }
-`, name)
+
+func (this *Base) QueryInt(c *gin.Context, name string, defaultVal ...int) int {
+	v := 0
+	if len(defaultVal) > 0 {
+		v = defaultVal[0]
+	}
+	p := c.Query(name)
+	if p == "" {
+		return v
+	}
+
+	i, err := strconv.Atoi(p)
+	if err != nil {
+		return v
+	}
+	return i
+}
+
+func (this *Base) ParamInt(c *gin.Context, name string, defaultVal ...int) int {
+	v := 0
+	if len(defaultVal) > 0 {
+		v = defaultVal[0]
+	}
+	p := c.Param(name)
+	if p == "" {
+		return v
+	}
+
+	i, err := strconv.Atoi(p)
+	if err != nil {
+		return v
+	}
+	return i
+}
+`, project_path, project_path)
 	write(root_path+"/server/handlers/base.go", str)
 }
 
@@ -217,7 +266,6 @@ func writeHomeHandler() {
 
 import (
 	"github.com/gin-gonic/gin"
-	"%s/server/pkg/errno"
 )
 
 type Home struct {
@@ -225,13 +273,282 @@ type Home struct {
 }
 
 func (this *Home) Check(c *gin.Context) {
-	this.Success(c, errno.OK)
+	this.Success(c)
 }`
-	write(root_path+"/server/handlers/home.go", fmt.Sprintf(str, name))
+	write(root_path+"/server/handlers/home.go", str)
 }
 
-func writeModelInit() {
-	str := `package models
+func writeConstvars() {
+	write(root_path+"/server/packages/constvar/vars.go", `package constvar
+
+const (
+	DATE_FORMAT            = "2006-01-02"
+	DATETIME_FORMAT        = "2006-01-02 15:04:05"
+	DATETIME_SIMPLE_FORMAT = "20060102150405"
+)
+`)
+}
+
+func writeErrnoCode() {
+	str := `package errno
+
+var (
+	// Common errors
+	OK                  = &Errno{Code: 200, Message: "操作成功"}
+	InternalServerError = &Errno{Code: 10001, Message: "系统错误"}
+	BindError           = &Errno{Code: 10002, Message: "非法的JSON数据"}
+	MissParamError      = &Errno{Code: 10003, Message: "缺少参数"}
+
+	DbError       = &Errno{Code: 30100, Message: "数据库错误"}
+	NotFoundError = &Errno{Code: 404, Message: "访问地址错误"}
+
+	RecordNotFoundError = &Errno{Code: 50000, Message: "未找到指定记录"}
+
+	NoticeError = &Errno{Code: -1, Message: ""}
+)
+`
+	write(root_path+"/server/packages/errno/code.go", str)
+}
+
+func writeErrnoErrno() {
+	str := `package errno
+
+type Errno struct {
+	Code           int
+	Debug          string
+	Message        string
+	customMessages []string
+}
+
+func (this *Errno) Error() string {
+	msg := this.Message
+
+	for _, c := range this.customMessages {
+		msg += " " + c
+	}
+
+	this.customMessages = []string{}
+	this.Debug = ""
+	return msg
+}
+
+func (this *Errno) Add(msg string) *Errno {
+	this.customMessages = append(this.customMessages, msg)
+	return this
+}
+
+func (this *Errno) AddDebug(msg string) *Errno {
+	this.Debug = msg
+	return this
+}
+`
+	write(root_path+"/server/packages/errno/errno.go", str)
+}
+
+func writeHttpClient() {
+	write(root_path+"/server/packages/httpclient/requester.go", `package httpclient
+
+import (
+	"bytes"
+	"errors"
+	"github.com/sirupsen/logrus"
+	"io/ioutil"
+	"net/http"
+	"strings"
+	"sync"
+)
+
+type Requester interface {
+	Prepare() error
+	GetURI() string
+	GetPostData() []byte
+	GetHeaders() map[string]string
+	GetMethod() string
+	Handle(rsp []byte, httpStatus int, err error)
+	Error() error
+}
+
+//var HttpClient *curl
+
+func New() *curl {
+	return &curl{
+		requests: make([]Requester, 0),
+	}
+}
+
+type curl struct {
+	requests []Requester
+}
+
+func (this *curl) AddRequest(req ...Requester) {
+	this.requests = append(this.requests, req...)
+}
+
+func (this *curl) Exec() error {
+
+	_exec := func(fn func(req Requester), req1 Requester, wg *sync.WaitGroup) {
+		defer func() {
+			if err := recover(); err != nil {
+				switch err.(type) {
+				case error:
+					logrus.Errorln("Error: ", err.(error).Error(), " in curl.Exec()")
+				}
+			}
+
+			wg.Done()
+		}()
+
+		fn(req1)
+	}
+
+	for _, req := range this.requests {
+		if err := req.Prepare(); err != nil {
+			return err
+		}
+	}
+
+	wg := new(sync.WaitGroup)
+	for _, req := range this.requests {
+		wg.Add(1)
+		method := strings.ToUpper(req.GetMethod())
+		if method == "GET" {
+			go _exec(this.get, req, wg)
+		} else if method == "POST" {
+			go _exec(this.post, req, wg)
+		} else if method == "PUT" {
+			go _exec(this.put, req, wg)
+		} else if method == "DELETE" {
+			go _exec(this.delete, req, wg)
+		}
+	}
+
+	wg.Wait()
+	this.requests = []Requester{}
+	return nil
+}
+
+func (this *curl) setHeaders(req *http.Request, headers map[string]string) {
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+}
+
+func (this *curl) do(client *http.Client, req *http.Request) (body []byte, status int, err error) {
+	rsp, err := client.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	defer rsp.Body.Close()
+	if rsp.StatusCode != 200 {
+		return nil, rsp.StatusCode, errors.New("request failed")
+	}
+	body, _ = ioutil.ReadAll(rsp.Body)
+	return body, 200, nil
+}
+
+func (this *curl) get(req Requester) {
+	client := &http.Client{}
+	req1, _ := http.NewRequest("GET", req.GetURI(), nil)
+
+	this.setHeaders(req1, req.GetHeaders())
+
+	body, status, err := this.do(client, req1)
+	req.Handle(body, status, err)
+}
+
+func (this *curl) delete(req Requester) {
+	client := &http.Client{}
+	req1, _ := http.NewRequest("DELETE", req.GetURI(), nil)
+
+	this.setHeaders(req1, req.GetHeaders())
+
+	body, status, err := this.do(client, req1)
+	req.Handle(body, status, err)
+}
+
+func (this *curl) post(req Requester) {
+	client := &http.Client{}
+	rawData := bytes.NewBuffer(req.GetPostData())
+	req1, _ := http.NewRequest("POST", req.GetURI(), rawData)
+	this.setHeaders(req1, req.GetHeaders())
+	body, status, err := this.do(client, req1)
+	req.Handle(body, status, err)
+}
+
+func (this *curl) put(req Requester) {
+	client := &http.Client{}
+	rawData := bytes.NewBuffer(req.GetPostData())
+	req1, _ := http.NewRequest("PUT", req.GetURI(), rawData)
+	this.setHeaders(req1, req.GetHeaders())
+	body, status, err := this.do(client, req1)
+	req.Handle(body, status, err)
+}
+`)
+}
+
+func writeStorageInit() {
+	write(root_path+"/server/packages/storage/init.go", `package storage
+
+const (
+	DbName = "driver_name"
+)
+
+func Init() {
+	DB.Init()
+	//Mongo.Init()
+	//Redis.Init()
+	//Searcher.Init()
+}
+`)
+}
+
+func writeMongo() {
+	write(root_path+"/server/packages/storage/mongo.go", `package storage
+
+import (
+	"github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
+	"gopkg.in/mgo.v2"
+)
+
+var Mongo *mongo
+
+func init() {
+	Mongo = new(mongo)
+}
+
+type mongo struct {
+	session *mgo.Session
+}
+
+func (this *mongo) Init() {
+	var err error
+	this.session, err = mgo.Dial(viper.GetString("mongo.host"))
+	if err != nil {
+		logrus.Debugln("Mongodb init failed,err: ", err)
+	}
+
+	//mgo.SetDebug(true)
+	//mgo.SetLogger(log.New(os.Stderr,"mgo: ",log.LstdFlags))
+
+	this.session.SetMode(mgo.Monotonic, true)
+	logrus.Debugln("MongoDB init success.")
+}
+
+func (this *mongo) Use(dbName string) *mgo.Database {
+	s := this.session.Copy()
+	return s.DB(dbName)
+}
+
+func (this *mongo) Close() {
+	this.session.Close()
+}
+`)
+}
+
+func writeMysql() {
+	write(root_path+"/server/packages/storage/mysql.go", `package storage
 
 import (
 	"fmt"
@@ -257,13 +574,13 @@ type Source struct {
 }
 
 func (s *Source) String() string {
-	u := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8",
+	u := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8&interpolateParams=true&parseTime=true&loc=Local",
+		//u := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8",
 		s.user,
 		s.pswd,
 		s.addr,
 		s.name)
 	//"Local")
-	//fmt.Println(u)
 	return u
 }
 
@@ -303,7 +620,7 @@ func openDB(key, masterUrl string, slaveUrls []string) *xorm.EngineGroup {
 func setupDB(key string, group *xorm.EngineGroup) {
 	if viper.GetBool(fmt.Sprintf("db.%s.showLog", key)) == true {
 		group.ShowSQL(true)
-		group.Logger().SetLevel(core.LOG_DEBUG)
+		group.Logger().SetLevel(core.LOG_INFO)
 	} else {
 		group.ShowSQL(false)
 	}
@@ -324,6 +641,9 @@ func setupDB(key string, group *xorm.EngineGroup) {
 		maxIdleConns = 20
 	}
 
+	local, _ := time.LoadLocation("Asia/Shanghai")
+	group.DatabaseTZ = local
+	group.TZLocation = local
 	group.SetMaxOpenConns(maxOpenConns)
 	group.SetMaxIdleConns(maxIdleConns)
 	//group.SetConnMaxLifetime(300 * time.Second)
@@ -422,63 +742,66 @@ func (db *Database) Close() {
 	}
 }
 
-func (db *Database) Get(dbKey string) *xorm.EngineGroup {
+func (db *Database) Use(dbKey string) *xorm.EngineGroup {
 	if d, ok := DB.connections[dbKey]; ok {
 		return d
 	} else {
 		return nil
 	}
 }
-`
-	write(root_path+"/server/models/init.go", str)
+`)
 }
 
-func writeErrnoCode() {
-	str := `package errno
+func writeRedis() {
+	write(root_path+"/server/packages/storage/redis.go", `package storage
 
-var (
-	// Common errors
-	OK                  = &Errno{Code: 200, Message: "Success"}
-	InternalServerError = &Errno{Code: 10001, Message: "Internal server error."}
-	BindError           = &Errno{Code: 10002, Message: "Error request body."}
-	MissParamError      = &Errno{Code: 10003, Message: "Missing param: "}
-
-	DbError = &Errno{Code: 30100, Message: "The database error with: "}
+import (
+	"github.com/go-redis/redis"
+	"github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
 )
-`
-	write(root_path+"/server/pkg/errno/code.go", str)
+
+var Redis *_redis
+
+func init() {
+	Redis = new(_redis)
 }
 
-func writeErrnoErrno() {
-	str := `package errno
-
-import "fmt"
-
-type Errno struct {
-	Code           int
-	Message        string
-	customMessages []string
+type _redis struct {
+	client *redis.Client
 }
 
-func (this *Errno) Error() string {
-	msg := this.Message
+func (this *_redis) Init() {
+	this.client = redis.NewClient(&redis.Options{
+		Addr:     viper.GetString("redis.addr"),
+		Password: viper.GetString("redis.password"), // no password set
+		DB:       viper.GetInt("redis.db"),          // use default DB
+	})
 
-	for _, c := range this.customMessages {
-		msg += " " + c
+	_, err := this.client.Ping().Result()
+	if err != nil {
+		logrus.Fatalln("Redis connecte failed.")
+	} else {
+		logrus.Debugln("Redis inited.")
 	}
-
-	msg += fmt.Sprintf(" [code: %d]", this.Code)
-
-	this.customMessages = []string{}
-	return msg
 }
 
-func (this *Errno) Add(msg string) *Errno {
-	this.customMessages = append(this.customMessages, msg)
-	return this
+func (this *_redis) Client() *redis.Client {
+	return this.client
 }
-`
-	write(root_path+"/server/pkg/errno/errno.go", str)
+`)
+}
+
+func writeResponse() {
+	str := `package protocols
+	
+type Response struct {
+	Code       int         %sjson:"code"%s
+	Message    string      %sjson:"message"%s
+	Debug      string      %sjson:"debug"%s
+	Attachment interface{} %sjson:"result"%s
+}`
+	write(root_path+"/server/protocols/response.go", fmt.Sprintf(str, "`", "`", "`", "`", "`", "`", "`", "`"))
 }
 
 func writeConsul() {
@@ -641,7 +964,7 @@ func InitNode(ctx context.Context) *Node {
 
 	return node
 }
-`, name)
+`, project_path)
 	write(root_path+"/server/registry/node.go", str)
 }
 
@@ -649,23 +972,28 @@ func writeRouter() {
 	str := fmt.Sprintf(`package router
 
 import (
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"%s/server/handlers"
+	"%s/server/protocols"
 	"%s/server/router/middleware"
 )
 
 func Load(g *gin.Engine) *gin.Engine {
 
 	// 防止 Panic 把进程干死
-	g.Use(gin.Recovery())
-	g.Use(middleware.Logger())
+	g.Use(gin.Recovery(), middleware.Logger())
+	g.Use(cors.New(cors.Config{
+		AllowAllOrigins: true,
+		AllowMethods:    []string{"POST", "GET", "PUT", "DELETE"},
+		AllowHeaders:    []string{"Access-Control-Allow-Headers:DNT,X-Mx-ReqToken,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,x-token"},
+	}))
 
 	// 默认404
 	g.NoRoute(func(context *gin.Context) {
-		context.JSON(404, gin.H{
-			"code": 404,
-			"msg":  "请求地址有误，请核实",
-			"data": gin.H{},
+		context.JSON(404, protocols.Response{
+			Code:    404,
+			Message: "Not Found",
 		})
 	})
 
@@ -673,7 +1001,7 @@ func Load(g *gin.Engine) *gin.Engine {
 
 	return g
 
-}`, name, name)
+}`, project_path, project_path, project_path)
 	write(root_path+"/server/router/router.go", str)
 }
 
@@ -689,51 +1017,6 @@ func Authorize(context *gin.Context) {
 }
 `
 	write(root_path+"/server/router/middleware/authorize.go", str)
-}
-
-func writeMiddlewareHeader() {
-	str := `package middleware
-
-import (
-	"github.com/gin-gonic/gin"
-	"net/http"
-	"time"
-)
-
-// 强制客户端不使用缓存
-func NoCache(c *gin.Context) {
-	c.Header("Cache-Control", "no-cache, no-store, max-age=0, must-revalidate, value")
-	c.Header("Expires", "Thu, 01 Jan 1970 00:00:00 GMT")
-	c.Header("Last-Modified", time.Now().UTC().Format(http.TimeFormat))
-	c.Next()
-}
-
-// 浏览器跨域 OPTIONS 请求设置，一般对于Jsonp或者websocket有影响
-func Options(c *gin.Context) {
-	if c.Request.Method != "OPTIONS" {
-		c.Next()
-	} else {
-		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "authorization, origin, content-type, accept")
-		c.Header("Allow", "HEAD,GET,POST,PUT,PATCH,DELETE,OPTIONS")
-		c.Header("Content-Type", "application/json")
-		c.AbortWithStatus(200)
-	}
-}
-
-// 一些安全设置
-func Secure(c *gin.Context) {
-	c.Header("Access-Control-Allow-Origin", "*")
-	c.Header("X-Frame-Options", "DENY")
-	c.Header("X-Content-Type-Options", "nosniff")
-	c.Header("X-XSS-Protection", "1; mode=block")
-	if c.Request.TLS != nil {
-		c.Header("Strict-Transport-Security", "max-age=31536000")
-	}
-}
-`
-	write(root_path+"/server/router/middleware/header.go", str)
 }
 
 func writeMiddlewareLogger() {
@@ -868,81 +1151,9 @@ func colorForMethod(method string) string {
 	write(root_path+"/server/router/middleware/logger.go", str)
 }
 
-func writeUtilsPool() {
-	str := `package utils
-
-import (
-	"sync/atomic"
-)
-
-type Pool struct {
-	c      chan interface{}
-	create func() interface{}
-
-	hit  int64
-	miss int64
-}
-
-func NewPool(initSize, maxSize int, fun func() interface{}) (p *Pool) {
-	if maxSize < 1 {
-		maxSize = 1
-	}
-
-	if initSize > maxSize {
-		initSize = maxSize
-	}
-
-	p = &Pool{
-		c:      make(chan interface{}, maxSize),
-		create: fun,
-	}
-
-	if initSize > 0 {
-		for i := 0; i < initSize; i++ {
-			i := fun()
-			// i.Init()
-			p.Put(i)
-		}
-	}
-
-	return
-}
-
-func (this *Pool) Get() (o interface{}) {
-	select {
-	case o = <-this.c:
-		atomic.AddInt64(&this.hit, 1)
-	default:
-		o = this.create()
-		atomic.AddInt64(&this.miss, 1)
-	}
-
-	// o.Init()
-	return
-}
-
-func (this *Pool) Put(o interface{}) {
-	// o.Reset()
-
-	select {
-	case this.c <- o:
-	default:
-	}
-}
-
-func (this *Pool) Hit() int64 {
-	return this.hit
-}
-
-func (this *Pool) Miss() int64 {
-	return this.miss
-}
-`
-	write(root_path+"/server/utils/pool.go", str)
-}
-
 func writeUtilsTools() {
 	str := `package utils
+
 
 import (
 	"crypto/md5"
@@ -1102,7 +1313,7 @@ func GreenwichToDate(date string) string {
 }
 
 func UUID() string {
-	id,_ := uuid.NewV4()
+	id, _ := uuid.NewV4()
 	return strings.Replace(id.String(), "-", "", -1)
 }
 
@@ -1128,6 +1339,7 @@ import (
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
+	"%s/server/packages/storage"
 )
 
 var (
@@ -1138,6 +1350,7 @@ var (
 func Init(ctx context.Context) {
 	node = registry.InitNode(ctx)
 	Registry = registry.NewRegistry()
+	storage.Init()
 }
 
 func Start() error {
@@ -1169,13 +1382,19 @@ func Stop() error {
 }
 
 func Register() error {
-	return Registry.Register(node)
+	if viper.GetBool("consul") {
+		return Registry.Register(node)
+	}
+	return nil
 }
 
 func Deregister() error {
-	return Registry.Degister(node)
+	if viper.GetBool("consul") {
+		return Registry.Degister(node)
+	}
+	return nil
 }
-`, name, name)
+`, project_path, project_path,project_path)
 
 	write(root_path+"/server/server.go", str)
 }

@@ -9,22 +9,23 @@ import (
 
 func MkDirs() {
 	dirs := []string{
+		"conf",
 		"server",
-		"server/conf",
 		"server/config",
 		"server/handlers",
 		"server/models",
-		"server/pkg",
-		"server/pkg/auth",
-		"server/pkg/constvar",
-		"server/pkg/token",
-		"server/pkg/version",
-		"server/pkg/errno",
+		"server/packages",
+		"server/packages/constvar",
+		"server/packages/errno",
+		"server/packages/httpclient",
+		"server/packages/storage",
 		"server/protocols",
 		"server/registry",
 		"server/router",
 		"server/router/middleware",
 		"server/services",
+		"server/services/dao",
+		"server/services/requests",
 		"server/utils",
 	}
 
