@@ -495,7 +495,7 @@ const (
 )
 
 func Init() {
-	DB.Init()
+	//DB.Init()
 	//Mongo.Init()
 	//Redis.Init()
 	//Searcher.Init()
@@ -554,7 +554,7 @@ import (
 	"fmt"
 
 	_ "github.com/go-sql-driver/mysql"
-	"github.com/go-xorm/core"
+	"xorm.io/core"
 	"github.com/go-xorm/xorm"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
@@ -1313,7 +1313,7 @@ func GreenwichToDate(date string) string {
 }
 
 func UUID() string {
-	id, _ := uuid.NewV4()
+	id := uuid.NewV4()
 	return strings.Replace(id.String(), "-", "", -1)
 }
 
