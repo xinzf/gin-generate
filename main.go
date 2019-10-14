@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	)
+)
 
 var (
 	name         string
@@ -33,7 +33,7 @@ func init() {
 }
 
 func main() {
-	if workspace == ""{
+	if workspace == "" {
 		fmt.Println("请提供工作区路径")
 		return
 	}
@@ -54,14 +54,15 @@ func main() {
 	writeRouter()
 	writeMiddlewareAuthorize()
 	writeMiddlewareLogger()
-	writeUtilsTools()
 	writeServer()
 	writeMakefile()
-	writeConstvars()
 	writeHttpClient()
 	writeStorageInit()
 	writeMongo()
 	writeMysql()
 	writeRedis()
 	writeResponse()
+	writeMock()
+	writeUtilsConvert()
+	writeTest()
 }

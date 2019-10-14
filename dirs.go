@@ -10,23 +10,24 @@ import (
 func MkDirs() {
 	dirs := []string{
 		"conf",
+		"core",
+		"core/config",
+		"core/httpclient",
+		"core/mock",
+		"core/registry",
+		"core/storage",
+		"core/utils",
 		"server",
-		"server/config",
+		"server/errno",
 		"server/handlers",
 		"server/models",
-		"server/packages",
-		"server/packages/constvar",
-		"server/packages/errno",
-		"server/packages/httpclient",
-		"server/packages/storage",
 		"server/protocols",
-		"server/registry",
 		"server/router",
 		"server/router/middleware",
 		"server/services",
 		"server/services/dao",
 		"server/services/requests",
-		"server/utils",
+		"tests",
 	}
 
 	for _, path := range dirs {
